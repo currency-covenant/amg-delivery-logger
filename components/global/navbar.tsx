@@ -59,7 +59,7 @@ export function Navbar() {
 
                     {/* Right Icons */}
                     <View className="flex-1 flex-row items-center gap-4 justify-end">
-                        {userRole === "user" && (
+                        {userRole === "driver" || userRole === "admin" && (
                             <Pressable className="flex-1 items-end">
                                 <UserButton />
                             </Pressable>
@@ -69,8 +69,6 @@ export function Navbar() {
                 </ThemedView>
             </SafeAreaView>
 
-            {/* Sidebar */}
-            {/*<Sidebar visible={sidebarVisible} onClose={() => setSidebarVisible(false)} />*/}
         </>
     );
 }

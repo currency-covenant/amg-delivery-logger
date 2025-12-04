@@ -1,4 +1,4 @@
-import "@/styles/global.css"
+import "../styles/global.css"
 import { ClerkProvider } from '@clerk/clerk-expo';
 import { tokenCache as clerkTokenCache } from '@clerk/clerk-expo/token-cache';
 import { ThemeProvider, DarkTheme, DefaultTheme } from '@react-navigation/native';
