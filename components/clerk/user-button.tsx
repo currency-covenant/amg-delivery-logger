@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useUser, useClerk } from '@clerk/clerk-expo';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { ProfileModal } from './ProfileModal';
+import { useRouter } from "expo-router";
 
 type NativeUserButtonProps = {
     size?: number;
@@ -12,6 +13,7 @@ type NativeUserButtonProps = {
 };
 
 export function UserButton({ size = 32, topOffset = 110, rightOffset = 16 }: NativeUserButtonProps) {
+    const router = useRouter();
     const { user } = useUser();
     const { signOut } = useClerk();
     const iconColor = useThemeColor({}, 'icon');
@@ -90,13 +92,21 @@ export function UserButton({ size = 32, topOffset = 110, rightOffset = 16 }: Nat
 
                         <Pressable
                             className="py-2"
-                            onPress={() => {
-                                signOut();
-                                setVisible(false);
+                            onPress={async () => {
+                                try {
+                                    await signOut();
+                                    setVisible(false);
+
+                                    // Redirect to sign-in (replace prevents stacking)
+                                    router.replace("/sign-in");
+                                } catch (err) {
+                                    console.error("Sign-out error:", err);
+                                }
                             }}
                         >
                             <Text className="text-base font-medium text-red-500">Sign Out</Text>
                         </Pressable>
+
                     </View>
                 </Pressable>
             </Modal>

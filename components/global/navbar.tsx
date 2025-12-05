@@ -7,7 +7,6 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '@clerk/clerk-expo';
 import { UserButton } from "@/components/clerk/user-button";
-// import { Sidebar } from "@/components/global/navbar/sidebar";
 import { useRouter } from "expo-router";
 
 export function Navbar() {
@@ -59,12 +58,9 @@ export function Navbar() {
 
                     {/* Right Icons */}
                     <View className="flex-1 flex-row items-center gap-4 justify-end">
-                        {userRole === "driver" || userRole === "admin" && (
                             <Pressable className="flex-1 items-end">
                                 <UserButton />
                             </Pressable>
-                        )}
-
                     </View>
                 </ThemedView>
             </SafeAreaView>
