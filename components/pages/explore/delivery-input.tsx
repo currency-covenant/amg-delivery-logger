@@ -3,6 +3,7 @@ import { View, Pressable, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useUser } from "@clerk/clerk-expo";
 import Toast from "react-native-toast-message";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/themed-text";
 import { Fonts } from "@/constants/theme";
@@ -33,6 +34,7 @@ export function DeliveryInput({
                                   onCancelEdit,
                               }: Props) {
     const { user } = useUser();
+    const queryClient = useQueryClient();
 
     const [batches, setBatches] = useState<BatchInput[]>([]);
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -147,6 +149,10 @@ export function DeliveryInput({
             {
                 onSuccess: () => {
                     Toast.show({ type: "success", text1: "Deliveries saved" });
+                    queryClient.invalidateQueries({
+                        queryKey: ["weekly-total", user.id],
+                    });
+
                     setBatches([]);
                     resetCurrentBatch();
                     onCancelEdit?.();
