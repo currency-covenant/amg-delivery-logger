@@ -346,7 +346,7 @@ export function DeliveryInput({
             {batches.length > 0 && (
                 <View className="mb-6">
                     <ThemedText className="text-base font-semibold mb-3">
-                        Added Batches ({batches.length})
+                        Added Deliveries ({batches.length})
                     </ThemedText>
 
                     {batches.map((b, idx) => (
@@ -362,21 +362,21 @@ export function DeliveryInput({
                             }`}
                         >
                             <View>
-                                <ThemedText className="font-mono text-sm opacity-70">
+                                <ThemedText className="font-bold text-4xl mb-1">
                                     Scanner
                                 </ThemedText>
-                                <ThemedText className="font-mono mb-1">
+                                <ThemedText className="font-medium mb-4">
                                     {b.scannerCode}
                                 </ThemedText>
 
-                                <ThemedText className="font-mono text-sm opacity-70">
-                                    Batch
+                                <ThemedText className=" mb-1 font-bold text-4xl text-white">
+                                    Package Group:
                                 </ThemedText>
-                                <ThemedText className="font-mono mb-1">
+                                <ThemedText className="font-medium mb-1">
                                     {b.batchDeliveryCode}
                                 </ThemedText>
 
-                                <ThemedText className="font-mono">
+                                <ThemedText className="font-medium">
                                     Count: {b.deliveryCount}
                                 </ThemedText>
                             </View>
