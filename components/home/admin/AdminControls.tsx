@@ -1,22 +1,11 @@
-import React, { useState } from "react";
+import React from "react";
 import { View, Pressable } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { ThemedText } from "@/components/themed-text";
-import { useUser } from "@clerk/clerk-expo";
-import { startOfWeek } from "date-fns";
-import { useWeeklyPayrollExport } from "@/app/api/supabase/admin/weeklyReports/useWeeklyPayrollExport";
+import { useWeeklyPayrollExport } from
+        "@/app/api/supabase/admin/weeklyReports/useWeeklyPayrollExport";
 
 export function AdminControls() {
-    const { user } = useUser();
-    const [selectedDate, setSelectedDate] = useState(new Date());
-
     const exportWeeklyPayroll = useWeeklyPayrollExport();
-
-    if (!user || user.publicMetadata?.role !== "admin") return null;
-
-    const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 })
-        .toISOString()
-        .slice(0, 10);
 
     return (
         <View className="px-6 mt-6">
@@ -26,24 +15,15 @@ export function AdminControls() {
                     Admin Tools
                 </ThemedText>
 
-                <DateTimePicker
-                    value={selectedDate}
-                    mode="date"
-                    display="default"
-                    onChange={(_, date) => date && setSelectedDate(date)}
-                />
-
                 <Pressable
-                    onPress={() =>
-                        exportWeeklyPayroll.mutate({ weekStart })
-                    }
+                    onPress={() => exportWeeklyPayroll.mutate()}
                     disabled={exportWeeklyPayroll.isPending}
                     className="mt-4 bg-blue-600 rounded-lg p-3"
                 >
                     <ThemedText className="text-center text-white font-semibold">
                         {exportWeeklyPayroll.isPending
-                            ? "Preparing Download..."
-                            : "Download Weekly Payroll (.xlsx)"}
+                            ? "Preparing Reports..."
+                            : "Download Weekly Reports (.zip)"}
                     </ThemedText>
                 </Pressable>
 

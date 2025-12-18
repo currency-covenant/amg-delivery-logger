@@ -1,23 +1,28 @@
-import { startOfWeek, endOfWeek } from "date-fns";
+import { startOfWeek, endOfWeek, subWeeks } from "date-fns";
 import supabaseClient from "@/clients/supabase";
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 
 /* ---------------------------------------
    Helpers
 --------------------------------------- */
-function getWeekStart(input: string) {
-    const d = new Date(input);
-    return startOfWeek(
-        Number.isNaN(d.getTime()) ? new Date() : d,
-        { weekStartsOn: 1 }
-    );
+
+// Last fully completed Monday → Sunday
+function getLastCompletedWeek() {
+    const today = new Date();
+
+    if (today.getDay() === 1) {
+        return startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 });
+    }
+
+    return startOfWeek(today, { weekStartsOn: 1 });
 }
 
-function toExcel(rows: Record<string, any>[]) {
+function toExcel(rows: Record<string, any>[], sheetName: string) {
     const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
 
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Weekly Payroll");
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
 
     return XLSX.write(workbook, {
         type: "array",
@@ -28,23 +33,16 @@ function toExcel(rows: Record<string, any>[]) {
 /* ---------------------------------------
    API Route
 --------------------------------------- */
-export async function GET(req: Request) {
+export async function GET() {
     try {
-        const { searchParams } = new URL(req.url);
-        const weekStartParam = searchParams.get("weekStart"); // YYYY-MM-DD (Monday)
-
-        if (!weekStartParam) {
-            return new Response("Missing weekStart", { status: 400 });
-        }
-
-        const weekStart = getWeekStart(weekStartParam);
+        const weekStart = getLastCompletedWeek();
         const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
 
         const weekStartISO = weekStart.toISOString().slice(0, 10);
         const weekEndISO = weekEnd.toISOString().slice(0, 10);
 
         /* ---------------------------------------
-           Query from deliveries (CORRECT ROOT)
+           Query from deliveries (correct root)
         --------------------------------------- */
         const { data, error } = await supabaseClient
             .from("deliveries")
@@ -55,8 +53,10 @@ export async function GET(req: Request) {
           email
         ),
         delivery_groups (
+          group_code,
           delivery_group_scans (
-            delivered_count
+            delivered_count,
+            scanners ( scanner_code )
           )
         )
       `)
@@ -73,28 +73,36 @@ export async function GET(req: Request) {
         }
 
         /* ---------------------------------------
-           Aggregate totals per driver
+           Build datasets
         --------------------------------------- */
-        const totals = new Map<string, any>();
+        const weekly = new Map<string, any>();
+        const daily = new Map<string, any>();
+        const raw: any[] = [];
 
         for (const delivery of data as any[]) {
             const driver = delivery.drivers;
             if (!driver?.email) continue;
 
-            const deliveryTotal =
-                delivery.delivery_groups?.reduce(
-                    (groupSum: number, group: any) =>
-                        groupSum +
-                        group.delivery_group_scans.reduce(
-                            (scanSum: number, scan: any) =>
-                                scanSum + scan.delivered_count,
-                            0
-                        ),
-                    0
-                ) ?? 0;
+            let deliveryTotal = 0;
 
-            if (!totals.has(driver.email)) {
-                totals.set(driver.email, {
+            for (const group of delivery.delivery_groups ?? []) {
+                for (const scan of group.delivery_group_scans ?? []) {
+                    deliveryTotal += scan.delivered_count;
+
+                    raw.push({
+                        driver_name: driver.full_name,
+                        email: driver.email,
+                        delivery_date: delivery.delivery_date,
+                        group_code: group.group_code,
+                        scanner_code: scan.scanners?.scanner_code ?? "",
+                        delivered_count: scan.delivered_count,
+                    });
+                }
+            }
+
+            // Weekly summary
+            if (!weekly.has(driver.email)) {
+                weekly.set(driver.email, {
                     driver_name: driver.full_name,
                     email: driver.email,
                     week_start: weekStartISO,
@@ -102,27 +110,48 @@ export async function GET(req: Request) {
                     total_deliveries: 0,
                 });
             }
+            weekly.get(driver.email).total_deliveries += deliveryTotal;
 
-            totals.get(driver.email).total_deliveries += deliveryTotal;
-        }
-
-        const rows = Array.from(totals.values());
-
-        if (rows.length === 0) {
-            return new Response("No payable deliveries", { status: 200 });
+            // Daily audit
+            const dailyKey = `${driver.email}|${delivery.delivery_date}`;
+            if (!daily.has(dailyKey)) {
+                daily.set(dailyKey, {
+                    driver_name: driver.full_name,
+                    email: driver.email,
+                    delivery_date: delivery.delivery_date,
+                    daily_total: 0,
+                });
+            }
+            daily.get(dailyKey).daily_total += deliveryTotal;
         }
 
         /* ---------------------------------------
-           Excel Output
+           Create ZIP
         --------------------------------------- */
-        const buffer = toExcel(rows);
+        const zip = new JSZip();
 
-        return new Response(buffer, {
+        zip.file(
+            "weekly_payroll_summary.xlsx",
+            toExcel(Array.from(weekly.values()), "Weekly Payroll")
+        );
+
+        zip.file(
+            "daily_audit.xlsx",
+            toExcel(Array.from(daily.values()), "Daily Audit")
+        );
+
+        zip.file(
+            "raw_scan_audit.xlsx",
+            toExcel(raw, "Raw Scan Audit")
+        );
+
+        const zipBuffer = await zip.generateAsync({ type: "arraybuffer" });
+
+        return new Response(zipBuffer, {
             headers: {
-                "Content-Type":
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "Content-Type": "application/zip",
                 "Content-Disposition":
-                    'attachment; filename="weekly_payroll_summary.xlsx"',
+                    `attachment; filename="weekly_reports_${weekStartISO}.zip"`,
             },
         });
     } catch (err: any) {
