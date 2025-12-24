@@ -1,154 +1,94 @@
 import supabaseClient from "@/clients/supabase";
 
-type GroupInput = {
-    group_code: string;
-    expected_count: number;
-    scans: {
-        scanner_code: string;
-        delivered_count: number;
-    }[];
+type DeliveryInput = {
+    driverAssignmentId: string;
+    deliveries: number;
 };
 
-export async function POST(req: Request) {
+type Payload = {
+    clerkAuthId: string;
+    deliveryDate: string; // YYYY-MM-DD
+    entries: DeliveryInput[];
+};
+
+export async function POST(request: Request): Promise<Response> {
     try {
-        const body = await req.json();
+        const body = (await request.json()) as Payload;
+        const { clerkAuthId, deliveryDate, entries } = body;
 
-        const {
-            clerk_auth_id,
-            delivery_date,
-            groups,
-        }: {
-            clerk_auth_id: string;
-            delivery_date: string;
-            groups: GroupInput[];
-        } = body;
-
-        if (!clerk_auth_id || !delivery_date || !groups?.length) {
-            return Response.json(
-                { error: "Missing required fields" },
+        if (!clerkAuthId || !deliveryDate || !entries?.length) {
+            return new Response(
+                JSON.stringify({ error: "Missing or invalid fields" }),
                 { status: 400 }
             );
         }
 
-        /* ---------------------------------------------------
-           1️⃣ Resolve Driver
-        --------------------------------------------------- */
-
-        const { data: driver, error: driverErr } = await supabaseClient
+        /* ---------------------------------------
+           1️⃣ Validate driver
+        --------------------------------------- */
+        const { data: driver } = await supabaseClient
             .from("drivers")
             .select("id")
-            .eq("clerk_auth_id", clerk_auth_id)
+            .eq("clerk_auth_id", clerkAuthId)
             .single();
 
-        if (driverErr || !driver) {
-            return Response.json(
-                { error: "Driver not found" },
+        if (!driver) {
+            return new Response(
+                JSON.stringify({ error: "Driver not found" }),
                 { status: 404 }
             );
         }
 
-        /* ---------------------------------------------------
-           2️⃣ Create or Fetch Delivery (1 per day)
-        --------------------------------------------------- */
+        const assignmentIds = entries.map((e) => e.driverAssignmentId);
 
-        const { data: delivery, error: deliveryErr } = await supabaseClient
-            .from("deliveries")
-            .upsert(
-                {
-                    driver_id: driver.id,
-                    delivery_date,
-                },
-                {
-                    onConflict: "driver_id,delivery_date",
-                }
-            )
+        /* ---------------------------------------
+           2️⃣ Ensure assignments belong to driver
+        --------------------------------------- */
+        const { data: assignments } = await supabaseClient
+            .from("driver_number_assignments")
             .select("id")
-            .single();
+            .eq("driver_id", driver.id)
+            .in("id", assignmentIds);
 
-        if (deliveryErr || !delivery) {
-            return Response.json(
-                { error: deliveryErr?.message || "Failed to create delivery" },
-                { status: 500 }
+        if (!assignments || assignments.length !== assignmentIds.length) {
+            return new Response(
+                JSON.stringify({ error: "Invalid assignments" }),
+                { status: 400 }
             );
         }
 
-        /* ---------------------------------------------------
-           3️⃣ 🔥 EDIT MODE LOGIC (DELETE FIRST)
-           This prevents duplication and allows removal
-        --------------------------------------------------- */
-
-        const { error: deleteErr } = await supabaseClient
-            .from("delivery_groups")
+        /* ---------------------------------------
+           3️⃣ Delete existing entries (edit-safe)
+        --------------------------------------- */
+        await supabaseClient
+            .from("delivery_entries")
             .delete()
-            .eq("delivery_id", delivery.id);
+            .in("driver_assignment_id", assignmentIds)
+            .eq("delivery_date", deliveryDate);
 
-        if (deleteErr) {
-            return Response.json(
-                { error: deleteErr.message },
-                { status: 500 }
-            );
+        /* ---------------------------------------
+           4️⃣ Insert new entries
+        --------------------------------------- */
+        const inserts = entries.map((e) => ({
+            driver_assignment_id: e.driverAssignmentId,
+            delivery_date: deliveryDate,
+            deliveries: e.deliveries,
+        }));
+
+        const { error } = await supabaseClient
+            .from("delivery_entries")
+            .insert(inserts);
+
+        if (error) {
+            throw new Error(error.message);
         }
 
-        /* ---------------------------------------------------
-           4️⃣ Reinsert Groups + Scans (fresh state)
-        --------------------------------------------------- */
-
-        for (const group of groups) {
-            const { data: deliveryGroup, error: groupErr } =
-                await supabaseClient
-                    .from("delivery_groups")
-                    .insert({
-                        delivery_id: delivery.id,
-                        group_code: group.group_code,
-                        expected_count: group.expected_count,
-                    })
-                    .select("id")
-                    .single();
-
-            if (groupErr || !deliveryGroup) {
-                return Response.json(
-                    { error: groupErr?.message || "Failed to create delivery group" },
-                    { status: 500 }
-                );
-            }
-
-            for (const scan of group.scans) {
-                const { data: scanner, error: scannerErr } =
-                    await supabaseClient
-                        .from("scanners")
-                        .select("id")
-                        .eq("scanner_code", scan.scanner_code)
-                        .eq("active", true)
-                        .single();
-
-                if (scannerErr || !scanner) {
-                    return Response.json(
-                        { error: `Scanner not found: ${scan.scanner_code}` },
-                        { status: 400 }
-                    );
-                }
-
-                const { error: scanErr } = await supabaseClient
-                    .from("delivery_group_scans")
-                    .insert({
-                        delivery_group_id: deliveryGroup.id,
-                        scanner_id: scanner.id,
-                        delivered_count: scan.delivered_count,
-                    });
-
-                if (scanErr) {
-                    return Response.json(
-                        { error: scanErr.message },
-                        { status: 400 }
-                    );
-                }
-            }
-        }
-
-        return Response.json({ success: true });
+        return new Response(JSON.stringify({ success: true }), {
+            status: 200,
+        });
     } catch (err: any) {
-        return Response.json(
-            { error: err.message || "Internal server error" },
+        return new Response(
+            JSON.stringify({ error: err.message }),
             { status: 500 }
         );
     }

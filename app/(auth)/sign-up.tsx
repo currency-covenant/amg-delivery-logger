@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 // Same warm browser hook
 import * as WebBrowser from "expo-web-browser";
+import {Logo} from "@/components/global/logo";
 WebBrowser.maybeCompleteAuthSession();
 
 const useWarmUpBrowser = () => {
@@ -211,6 +212,9 @@ export default function SignUpScreen() {
                     className="bg-neutral-900 p-6 rounded-2xl shadow-md border border-neutral-800"
                     style={{ opacity: fadeAnim }}
                 >
+                    <View className="items-center mb-4">
+                        <Logo size={150} />
+                    </View>
                     <Text className="text-white text-3xl font-bold text-center mb-6">
                         Create Account
                     </Text>

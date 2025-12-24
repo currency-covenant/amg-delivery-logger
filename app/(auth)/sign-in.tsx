@@ -17,6 +17,7 @@ import { useSSO, useSignIn } from "@clerk/clerk-expo";
 import * as WebBrowser from "expo-web-browser";
 import * as AuthSession from "expo-auth-session";
 import { Ionicons } from "@expo/vector-icons";
+import {Logo} from "@/components/global/logo";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -306,11 +307,14 @@ export default function SignInPage() {
                 className="flex-1 justify-center bg-black"
                 keyboardVerticalOffset={Platform.OS === "ios" ? 40 : -80}
             >
-                <View className="px-6 flex-1 justify-center">
+                <View className="px-6 flex-1 justify-center ">
                     <Animated.View
                         style={{ opacity: fadeAnim }}
                         className="bg-neutral-900 p-6 rounded-2xl shadow-md border border-neutral-800"
                     >
+                        <View className="items-center mb-4">
+                            <Logo size={150} />
+                        </View>
                         <Text className="text-white text-3xl font-bold text-center mb-6">
                             Sign In
                         </Text>

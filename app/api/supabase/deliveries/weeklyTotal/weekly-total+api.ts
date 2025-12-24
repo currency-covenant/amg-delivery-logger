@@ -1,6 +1,6 @@
+// api/supabase/deliveries/weeklyTotal/weekly-total+api.ts
 import { startOfWeek, endOfWeek } from "date-fns";
 import supabaseClient from "@/clients/supabase";
-
 
 export async function GET(req: Request) {
     try {
@@ -17,14 +17,13 @@ export async function GET(req: Request) {
         /* ---------------------------------------
            Resolve driver
         --------------------------------------- */
-
-        const { data: driver, error: driverError } = await supabaseClient
+        const { data: driver } = await supabaseClient
             .from("drivers")
             .select("id")
             .eq("clerk_auth_id", clerkAuthId)
             .single();
 
-        if (driverError || !driver) {
+        if (!driver) {
             return Response.json(
                 { error: "Driver not found" },
                 { status: 404 }
@@ -32,37 +31,32 @@ export async function GET(req: Request) {
         }
 
         /* ---------------------------------------
-           Calculate week range (Mon → Sun)
+           Calculate week (Mon → Sun)
         --------------------------------------- */
-
         const now = new Date();
-        const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-        const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
-
-        const weekStartISO = weekStart.toISOString().slice(0, 10);
-        const weekEndISO = weekEnd.toISOString().slice(0, 10);
+        const weekStart = startOfWeek(now, { weekStartsOn: 1 })
+            .toISOString()
+            .slice(0, 10);
+        const weekEnd = endOfWeek(now, { weekStartsOn: 1 })
+            .toISOString()
+            .slice(0, 10);
 
         /* ---------------------------------------
-           Aggregate deliveries
+           Fetch weekly delivery entries via assignments
         --------------------------------------- */
-
-        const { data, error } = await supabaseClient
-            .from("delivery_group_scans")
+        const { data: rows, error } = await supabaseClient
+            .from("delivery_entries")
             .select(
                 `
-        delivered_count,
-        delivery_groups (
-          delivery_id,
-          deliveries (
-            delivery_date,
-            driver_id
-          )
-        )
-      `
+                deliveries,
+                driver_number_assignments!inner (
+                    driver_id
+                )
+            `
             )
-            .eq("delivery_groups.deliveries.driver_id", driver.id)
-            .gte("delivery_groups.deliveries.delivery_date", weekStartISO)
-            .lte("delivery_groups.deliveries.delivery_date", weekEndISO);
+            .eq("driver_number_assignments.driver_id", driver.id)
+            .gte("delivery_date", weekStart)
+            .lte("delivery_date", weekEnd);
 
         if (error) {
             return Response.json(
@@ -71,19 +65,15 @@ export async function GET(req: Request) {
             );
         }
 
-        const totalDelivered = data.reduce(
-            (sum, row) => sum + row.delivered_count,
+        const totalDelivered = (rows ?? []).reduce(
+            (sum, r) => sum + r.deliveries,
             0
         );
 
-        /* ---------------------------------------
-           Response
-        --------------------------------------- */
-
         return Response.json({
             driverId: driver.id,
-            weekStart: weekStartISO,
-            weekEnd: weekEndISO,
+            weekStart,
+            weekEnd,
             totalDelivered,
         });
     } catch (err: any) {

@@ -1,4 +1,3 @@
-// app/api/syncDrivers/useSyncDriver.ts
 import { useMutation } from "@tanstack/react-query";
 
 interface SyncDriverPayload {
@@ -6,6 +5,7 @@ interface SyncDriverPayload {
     email: string | null | undefined;
     first_name: string;
     last_name: string;
+    area_id: string;
 }
 
 async function syncDriverRequest(payload: SyncDriverPayload) {

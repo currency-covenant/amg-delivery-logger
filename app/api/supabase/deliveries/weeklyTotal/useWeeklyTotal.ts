@@ -24,15 +24,11 @@ async function fetchWeeklyTotal(
     return res.json();
 }
 
-/* ---------------------------------------
-   Hook
---------------------------------------- */
-
 export function useWeeklyTotal(clerkAuthId?: string) {
     return useQuery({
         queryKey: ["weekly-total", clerkAuthId],
         queryFn: () => fetchWeeklyTotal(clerkAuthId!),
         enabled: !!clerkAuthId,
-        staleTime: 1000 * 60 * 5, // 5 minutes
+        staleTime: 1000 * 60 * 5,
     });
 }
