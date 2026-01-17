@@ -10,7 +10,7 @@ export function AdminControls() {
     const exportWeeklyPayroll = useWeeklyPayrollExport();
     const [selectedDate, setSelectedDate] = useState(new Date());
 
-    const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 })
+    const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 })
         .toISOString()
         .slice(0, 10);
 

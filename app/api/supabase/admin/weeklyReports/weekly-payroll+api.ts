@@ -1,331 +1,353 @@
-import { startOfWeek, endOfWeek, subWeeks } from "date-fns";
-import supabaseClient from "@/clients/supabase";
+import { startOfWeek, endOfWeek } from "date-fns";
 import * as XLSX from "xlsx";
-import fs from "fs";
-import path from "path";
+import supabaseClient from "@/clients/supabase";
 
-/* ---------------------------------------
-   Week helpers (Sunday → Saturday)
---------------------------------------- */
+/**
+ * IMPORTANT:
+ * Metro can ONLY load local binary assets via static import.
+ * This is an ArrayBuffer-compatible value at runtime.
+ */
+import PayrollTemplate from "../../../../../assets/payroll/PayrollTemplate.xlsx";
 
-function getLastCompletedWeek(): Date {
-    const today = new Date();
-    return today.getDay() === 0
-        ? startOfWeek(subWeeks(today, 1), { weekStartsOn: 0 })
-        : startOfWeek(today, { weekStartsOn: 0 });
-}
+/* ============================
+   WEEK HELPERS (SUNDAY)
+============================ */
 
 function getWeekStartSafe(input?: string | null): Date {
-    if (!input) return getLastCompletedWeek();
-    const d = new Date(input);
-    return Number.isNaN(d.getTime())
-        ? getLastCompletedWeek()
-        : startOfWeek(d, { weekStartsOn: 0 });
+  const d = input ? new Date(input) : new Date();
+  return startOfWeek(Number.isNaN(d.getTime()) ? new Date() : d, {
+    weekStartsOn: 0,
+  });
 }
 
-/* ---------------------------------------
-   Excel helpers
---------------------------------------- */
-
-function findAreaHeaderRow(
-    sheet: XLSX.WorkSheet,
-    areaName: string
-): number | null {
-    const ref = sheet["!ref"];
-    if (!ref) return null;
-
-    const range = XLSX.utils.decode_range(ref);
-
-    for (let r = range.s.r; r <= range.e.r; r++) {
-        const cell = sheet[`A${r + 1}`] ?? sheet[`B${r + 1}`];
-        if (
-            cell?.t === "s" &&
-            String(cell.v).trim().toLowerCase() === areaName.toLowerCase()
-        ) {
-            return r + 2; // insert BELOW header row
-        }
-    }
-
-    return null;
+function toISO(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
-/* ---------------------------------------
-   Relation helper (Supabase returns array for joins)
---------------------------------------- */
-
-function firstRel<T>(val: T[] | null | undefined): T | undefined {
-    if (!val || val.length === 0) return undefined;
-    return val[0];
+function dayIndex(isoDate: string): number {
+  return new Date(`${isoDate}T00:00:00`).getDay(); // 0=Sun .. 6=Sat
 }
 
-/* ---------------------------------------
-   Types (match Supabase shapes)
---------------------------------------- */
+/* ============================
+   TEMPLATE BLOCKS
+============================ */
 
-type AreaRow = { id: string; name: string };
+type AreaKey = "REDLANDS" | "FLOATER" | "LANCASTER_PALMDALE" | "HESPERIA";
+
+const BLOCKS: Record<AreaKey, { start: number; end: number; donor: number }> = {
+  REDLANDS: { start: 6, end: 22, donor: 6 },
+  FLOATER: { start: 24, end: 40, donor: 24 },
+  LANCASTER_PALMDALE: { start: 48, end: 66, donor: 48 },
+  HESPERIA: { start: 68, end: 74, donor: 68 },
+};
+
+function bucketForArea(name: string): AreaKey | null {
+  const v = name.toLowerCase();
+  if (v.includes("redlands")) return "REDLANDS";
+  if (v.includes("floater")) return "FLOATER";
+  if (v.includes("lancaster") || v.includes("landcaster") || v.includes("palmdale"))
+    return "LANCASTER_PALMDALE";
+  if (v.includes("hesperia")) return "HESPERIA";
+  return null;
+}
+
+/* ============================
+   TYPES (STRICT)
+============================ */
 
 type DriverRow = {
-    id: string;
-    full_name: string;
-    manager: boolean | null;
-    seasonal: boolean | null;
-    // Supabase join often returns arrays even for FK joins
-    areas: AreaRow[] | null;
+  id: string;
+  full_name: string;
+  manager: boolean | null;
+  seasonal: boolean | null;
+  areas: { name: string }[]; // Supabase relationship arrays
 };
 
 type AssignmentRow = {
-    id: string;
-    driver_id: string;
-    driver_numbers: { driver_number: string }[] | null;
+  id: string;
+  driver_id: string;
+  driver_numbers: { driver_number: string }[];
 };
 
-type DeliveryEntryRow = {
-    driver_assignment_id: string;
-    delivery_date: string; // YYYY-MM-DD
-    deliveries: number;
+type DeliveryRow = {
+  driver_assignment_id: string;
+  delivery_date: string;
+  deliveries: number;
 };
 
-type PayrollRow = {
-    name: string;
-    driverNumber: string;
-    role: "Manager" | "Regular" | "Seasonal";
-    days: number[]; // Sun → Sat (0..6)
-    total: number;
+type Role = "driver" | "seasonal" | "manager";
+
+type DriverLine = {
+  num: string;
+  days: number[];
 };
 
-/* ---------------------------------------
-   API Route
---------------------------------------- */
+type BucketDriver = {
+  name: string;
+  role: Role;
+  area: string;
+  isManager: boolean;
+  lines: DriverLine[];
+};
+
+/* ============================
+   XLSX HELPERS
+============================ */
+
+function a1(col: string, row: number): string {
+  return `${col}${row}`;
+}
+
+function writeCell(
+    sheet: XLSX.WorkSheet,
+    addr: string,
+    value: string | number,
+    donor?: XLSX.CellObject
+): void {
+  const existing = sheet[addr];
+  if (existing) {
+    existing.v = value;
+    return;
+  }
+
+  const cell: XLSX.CellObject = {
+    t: typeof value === "number" ? "n" : "s",
+    v: value,
+  };
+
+  if (donor?.s) (cell as any).s = donor.s;
+  sheet[addr] = cell;
+}
+
+function ensureMerges(sheet: XLSX.WorkSheet): void {
+  if (!sheet["!merges"]) sheet["!merges"] = [];
+}
+
+function merge(sheet: XLSX.WorkSheet, s: string, e: string): void {
+  ensureMerges(sheet);
+  sheet["!merges"]!.push({
+    s: XLSX.utils.decode_cell(s),
+    e: XLSX.utils.decode_cell(e),
+  });
+}
+
+function roleFor(isManager: boolean, seasonal: boolean): Role {
+  if (isManager) return "manager";
+  if (seasonal) return "seasonal";
+  return "driver";
+}
+
+/* ============================
+   API ROUTE (EXPO SAFE)
+============================ */
 
 export async function GET(req: Request): Promise<Response> {
-    try {
-        const { searchParams } = new URL(req.url);
-        const weekStartParam = searchParams.get("weekStart");
+  const { searchParams } = new URL(req.url);
 
-        const weekStart = getWeekStartSafe(weekStartParam);
-        const weekEnd = endOfWeek(weekStart, { weekStartsOn: 0 });
+  const weekStart = getWeekStartSafe(searchParams.get("weekStart"));
+  const weekEnd = endOfWeek(weekStart, { weekStartsOn: 0 });
 
-        const weekStartISO = weekStart.toISOString().slice(0, 10);
-        const weekEndISO = weekEnd.toISOString().slice(0, 10);
+  const startISO = toISO(weekStart);
+  const endISO = toISO(weekEnd);
 
-        /* ---------------------------------------
-           Load template
-        --------------------------------------- */
+  /* -------- LOAD TEMPLATE (STATIC IMPORT) -------- */
 
-        const workbook = XLSX.read(
-            fs.readFileSync(path.join(process.cwd(), "Payroll-Template.xlsx")),
-            { type: "buffer", cellStyles: true }
-        );
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const workbook = XLSX.read(payrollTemplate as ArrayBuffer, {
+    type: "array",
+    cellStyles: true,
+  });
 
-        /* ---------------------------------------
-           1) Fetch drivers (base table, always present)
-        --------------------------------------- */
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!sheet) {
+    return new Response("Invalid payroll template", { status: 500 });
+  }
 
-        const { data: driversRaw, error: driversError } =
-            await supabaseClient
-                .from("drivers")
-                .select(
-                    `
-                    id,
-                    full_name,
-                    manager,
-                    seasonal,
-                    areas:area_id ( id, name )
-                `
-                );
+  /* -------- DRIVERS -------- */
 
-        if (driversError) {
-            return new Response(
-                JSON.stringify({ error: driversError.message }),
-                { status: 500 }
-            );
-        }
+  const { data: driversRaw, error: driversError } = await supabaseClient
+      .from("drivers")
+      .select("id, full_name, manager, seasonal, areas(name)");
 
-        const drivers: DriverRow[] = (driversRaw ?? []).map((d) => ({
-            id: String((d as any).id),
-            full_name: String((d as any).full_name),
-            manager: (d as any).manager ?? null,
-            seasonal: (d as any).seasonal ?? null,
-            areas: Array.isArray((d as any).areas) ? (d as any).areas : null,
-        }));
+  if (driversError) {
+    return new Response(driversError.message, { status: 500 });
+  }
 
-        if (drivers.length === 0) {
-            return new Response("No drivers found", { status: 200 });
-        }
+  const drivers: DriverRow[] = (driversRaw ?? []).map((d) => ({
+    id: String(d.id),
+    full_name: String(d.full_name),
+    manager: d.manager ?? false,
+    seasonal: d.seasonal ?? false,
+    areas: Array.isArray(d.areas)
+        ? d.areas.map((a) => ({ name: String(a.name) }))
+        : [],
+  }));
 
-        /* ---------------------------------------
-           2) Fetch assignments overlapping the selected week
-        --------------------------------------- */
+  /* -------- ASSIGNMENTS (WEEK-AWARE) -------- */
 
-        const { data: assignmentsRaw, error: assignError } =
-            await supabaseClient
-                .from("driver_number_assignments")
-                .select(
-                    `
-                    id,
-                    driver_id,
-                    driver_numbers ( driver_number )
-                `
-                )
-                .lte("week_start", weekEndISO)
-                .or(`week_end.is.null,week_end.gte.${weekStartISO}`);
+  const driverIds = drivers.map((d) => d.id);
 
-        if (assignError) {
-            return new Response(
-                JSON.stringify({ error: assignError.message }),
-                { status: 500 }
-            );
-        }
+  const { data: assignmentsRaw, error: assignmentsError } =
+      await supabaseClient
+          .from("driver_number_assignments")
+          .select("id, driver_id, week_start, week_end, driver_numbers(driver_number)")
+          .in("driver_id", driverIds)
+          .lte("week_start", startISO)
+          .or(`week_end.is.null,week_end.gte.${endISO}`);
 
-        const assignments: AssignmentRow[] = (assignmentsRaw ?? []).map((a) => ({
-            id: String((a as any).id),
-            driver_id: String((a as any).driver_id),
-            driver_numbers: Array.isArray((a as any).driver_numbers)
-                ? (a as any).driver_numbers
-                : null,
-        }));
+  if (assignmentsError) {
+    return new Response(assignmentsError.message, { status: 500 });
+  }
 
-        const assignmentIds = assignments.map((a) => a.id);
+  const assignments: AssignmentRow[] = (assignmentsRaw ?? []).map((a) => ({
+    id: String(a.id),
+    driver_id: String(a.driver_id),
+    driver_numbers: Array.isArray(a.driver_numbers)
+        ? a.driver_numbers.map((n) => ({
+          driver_number: String(n.driver_number),
+        }))
+        : [],
+  }));
 
-        /* ---------------------------------------
-           3) Fetch delivery entries for those assignments (within the week)
-        --------------------------------------- */
+  const assignmentsByDriver: Record<string, AssignmentRow[]> = {};
+  for (const a of assignments) {
+    (assignmentsByDriver[a.driver_id] ??= []).push(a);
+  }
 
-        const entriesByAssignment: Record<string, DeliveryEntryRow[]> = {};
+  /* -------- DELIVERIES -------- */
 
-        if (assignmentIds.length > 0) {
-            const { data: entriesRaw, error: entriesError } =
-                await supabaseClient
-                    .from("delivery_entries")
-                    .select("driver_assignment_id, delivery_date, deliveries")
-                    .in("driver_assignment_id", assignmentIds)
-                    .gte("delivery_date", weekStartISO)
-                    .lte("delivery_date", weekEndISO);
+  const deliveryMap: Record<string, number[]> = {};
+  const assignmentIds = assignments.map((a) => a.id);
 
-            if (entriesError) {
-                return new Response(
-                    JSON.stringify({ error: entriesError.message }),
-                    { status: 500 }
-                );
-            }
+  if (assignmentIds.length > 0) {
+    const { data: deliveriesRaw, error: deliveriesError } =
+        await supabaseClient
+            .from("delivery_entries")
+            .select("driver_assignment_id, delivery_date, deliveries")
+            .in("driver_assignment_id", assignmentIds)
+            .gte("delivery_date", startISO)
+            .lte("delivery_date", endISO);
 
-            const entries: DeliveryEntryRow[] = (entriesRaw ?? []).map((e) => ({
-                driver_assignment_id: String((e as any).driver_assignment_id),
-                delivery_date: String((e as any).delivery_date),
-                deliveries: Number((e as any).deliveries ?? 0),
+    if (deliveriesError) {
+      return new Response(deliveriesError.message, { status: 500 });
+    }
+
+    const deliveries: DeliveryRow[] = (deliveriesRaw ?? []) as DeliveryRow[];
+
+    for (const e of deliveries) {
+      const idx = dayIndex(e.delivery_date);
+      if (!deliveryMap[e.driver_assignment_id]) {
+        deliveryMap[e.driver_assignment_id] = [0, 0, 0, 0, 0, 0, 0];
+      }
+      deliveryMap[e.driver_assignment_id][idx] += e.deliveries;
+    }
+  }
+
+  /* -------- BUILD BUCKETS -------- */
+
+  const buckets: Record<AreaKey, BucketDriver[]> = {
+    REDLANDS: [],
+    FLOATER: [],
+    LANCASTER_PALMDALE: [],
+    HESPERIA: [],
+  };
+
+  for (const d of drivers) {
+    const areaName = d.areas[0]?.name;
+    if (!areaName) continue;
+
+    const key = bucketForArea(areaName);
+    if (!key) continue;
+
+    const isManager = Boolean(d.manager);
+    const role = roleFor(isManager, Boolean(d.seasonal));
+
+    const driverAssignments = assignmentsByDriver[d.id] ?? [];
+
+    const lines: DriverLine[] =
+        driverAssignments.length === 0
+            ? [{ num: "—", days: [0, 0, 0, 0, 0, 0, 0] }]
+            : driverAssignments.map((a) => ({
+              num: a.driver_numbers[0]?.driver_number ?? "—",
+              days: deliveryMap[a.id] ?? [0, 0, 0, 0, 0, 0, 0],
             }));
 
-            for (const e of entries) {
-                (entriesByAssignment[e.driver_assignment_id] ??= []).push(e);
-            }
-        }
+    buckets[key].push({
+      name: d.full_name,
+      role,
+      area: areaName,
+      isManager,
+      lines,
+    });
+  }
 
-        /* ---------------------------------------
-           4) Build payroll rows grouped by area
-        --------------------------------------- */
+  for (const key of Object.keys(buckets) as AreaKey[]) {
+    buckets[key].sort((a, b) =>
+        a.isManager === b.isManager
+            ? a.name.localeCompare(b.name)
+            : a.isManager
+                ? 1
+                : -1
+    );
+  }
 
-        const byArea: Record<string, PayrollRow[]> = {};
+  /* -------- WRITE TO SHEET -------- */
 
-        for (const driver of drivers) {
-            const area = firstRel(driver.areas ?? null);
-            if (!area?.name) continue;
+  const cols = "ABCDEFGHIJKLM".split("");
 
-            const role: PayrollRow["role"] = driver.manager
-                ? "Manager"
-                : driver.seasonal
-                    ? "Seasonal"
-                    : "Regular";
+  for (const key of Object.keys(BLOCKS) as AreaKey[]) {
+    const { start, end, donor } = BLOCKS[key];
 
-            const driverAssignments = assignments.filter(
-                (a) => a.driver_id === driver.id
-            );
+    const donors: Record<string, XLSX.CellObject | undefined> = {};
+    for (const c of cols) donors[c] = sheet[a1(c, donor)];
 
-            // Include drivers even if no assignments
-            if (driverAssignments.length === 0) {
-                byArea[area.name] ??= [];
-                byArea[area.name].push({
-                    name: driver.full_name,
-                    driverNumber: "—",
-                    role,
-                    days: [0, 0, 0, 0, 0, 0, 0],
-                    total: 0,
-                });
-                continue;
-            }
+    let row = start;
+    let index = 1;
 
-            // One row per driver number assignment
-            for (const a of driverAssignments) {
-                const dn = firstRel(a.driver_numbers ?? null);
-                const driverNumber = dn?.driver_number ?? "—";
+    for (const d of buckets[key]) {
+      if (row > end) break;
 
-                const days = [0, 0, 0, 0, 0, 0, 0]; // Sun..Sat
-                let total = 0;
+      const startRow = row;
 
-                for (const e of entriesByAssignment[a.id] ?? []) {
-                    // 0=Sun..6=Sat
-                    const dayIdx = new Date(`${e.delivery_date}T00:00:00`).getDay();
-                    days[dayIdx] += e.deliveries;
-                    total += e.deliveries;
-                }
+      for (const line of d.lines) {
+        if (row > end) break;
 
-                byArea[area.name] ??= [];
-                byArea[area.name].push({
-                    name: driver.full_name,
-                    driverNumber,
-                    role,
-                    days,
-                    total,
-                });
-            }
-        }
+        writeCell(sheet, a1("A", row), index, donors["A"]);
+        writeCell(sheet, a1("B", row), d.area, donors["B"]);
+        writeCell(sheet, a1("C", row), d.role, donors["C"]);
+        writeCell(sheet, a1("D", row), d.name, donors["D"]);
+        writeCell(sheet, a1("E", row), line.num, donors["E"]);
 
-        /* ---------------------------------------
-           5) Write into template under area headers
-        --------------------------------------- */
-
-        for (const [areaName, rows] of Object.entries(byArea)) {
-            const startRow = findAreaHeaderRow(sheet, areaName);
-            if (!startRow) continue;
-
-            let row = startRow;
-            let index = 1;
-
-            for (const r of rows) {
-                sheet[`A${row}`] = { t: "n", v: index++ };
-                sheet[`B${row}`] = { t: "s", v: r.name };
-                sheet[`C${row}`] = { t: "s", v: r.driverNumber };
-
-                // D..J = Sun..Sat
-                r.days.forEach((v, i) => {
-                    sheet[String.fromCharCode(68 + i) + row] = { t: "n", v };
-                });
-
-                sheet[`K${row}`] = { t: "n", v: r.total };
-                row++;
-            }
-        }
-
-        /* ---------------------------------------
-           Export
-        --------------------------------------- */
-
-        const buffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
-
-        return new Response(buffer, {
-            headers: {
-                "Content-Type":
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "Content-Disposition":
-                    `attachment; filename="weekly_payroll_${weekStartISO}.xlsx"`,
-            },
+        line.days.forEach((v, i) => {
+          writeCell(sheet, a1(String.fromCharCode(70 + i), row), v, donors["F"]);
         });
-    } catch (err: unknown) {
-        return new Response(
-            JSON.stringify({
-                error: err instanceof Error ? err.message : "Unexpected error",
-            }),
-            { status: 500 }
-        );
+
+        const weeklyTotal = line.days.reduce((a, b) => a + b, 0);
+        writeCell(sheet, a1("M", row), weeklyTotal, donors["M"]);
+
+        row++;
+      }
+
+      const endRow = row - 1;
+      if (endRow > startRow) {
+        merge(sheet, a1("A", startRow), a1("A", endRow));
+        merge(sheet, a1("D", startRow), a1("D", endRow));
+        merge(sheet, a1("B", startRow), a1("B", endRow));
+        merge(sheet, a1("C", startRow), a1("C", endRow));
+      }
+
+      index++;
     }
+  }
+
+  /* -------- RETURN FILE -------- */
+
+  const out = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+
+  return new Response(out, {
+    headers: {
+      "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="weekly_payroll_${startISO}.xlsx"`,
+    },
+  });
 }

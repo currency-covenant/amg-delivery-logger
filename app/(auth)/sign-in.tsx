@@ -302,20 +302,19 @@ export default function SignInPage() {
     return (
         <>
             {/* MAIN SIGN-IN SCREEN */}
-            <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                className="flex-1 justify-center bg-black"
-                keyboardVerticalOffset={Platform.OS === "ios" ? 40 : -80}
-            >
-                <View className="px-6 flex-1 justify-center ">
-                    <Animated.View
-                        style={{ opacity: fadeAnim }}
-                        className="bg-neutral-900 p-6 rounded-2xl shadow-md border border-neutral-800"
-                    >
+<KeyboardAvoidingView
+                 behavior={Platform.OS === "ios" ? "padding" : "height"}
+                 className="flex-1 justify-center bg-black"
+                 keyboardVerticalOffset={Platform.OS === "ios" ? 40 : -80}
+             >
+                 <View className="flex-1 items-center justify-center p-4 md:p-6">
+                     <View className="w-full max-w-lg bg-neutral-900 p-6 rounded-2xl shadow-md border border-neutral-800">
+                     <Animated.View style={{ opacity: fadeAnim }} className="bg-neutral-900 p-6 rounded-2xl shadow-md border border-neutral-800">
+
                         <View className="items-center mb-4">
                             <Logo size={150} />
                         </View>
-                        <Text className="text-white text-3xl font-bold text-center mb-6">
+                        <Text className="text-white text-3xl md:text-4xl font-bold text-center mb-6">
                             Sign In
                         </Text>
 
@@ -355,7 +354,7 @@ export default function SignInPage() {
                         {/* Email */}
                         <Text className="text-neutral-400 mb-1">Email</Text>
                         <TextInput
-                            className="bg-neutral-800 text-white px-4 py-3 rounded-xl mb-1"
+                            className="bg-neutral-800 text-white px-4 py-3 rounded-xl mb-1 w-full"
                             placeholder="you@example.com"
                             placeholderTextColor="#777"
                             value={email}
@@ -367,7 +366,7 @@ export default function SignInPage() {
                         <Text className="text-neutral-400 mb-1 mt-3">Password</Text>
                         <View className="mb-2">
                             <TextInput
-                                className="bg-neutral-800 text-white px-4 py-3 rounded-xl"
+                                className="bg-neutral-800 text-white px-4 py-3 rounded-xl w-full"
                                 placeholder="Password"
                                 placeholderTextColor="#777"
                                 secureTextEntry={!passwordVisible}
@@ -394,8 +393,8 @@ export default function SignInPage() {
                         {/* Continue */}
                         <TouchableOpacity
                             onPress={attemptLogin}
-                            disabled={emailFlowLoading}
-                            className="bg-blue-600 py-3 rounded-xl mt-2"
+                        disabled={emailFlowLoading}
+                        className="bg-blue-600 py-3 rounded-xl mt-2 w-full"
                         >
                             <Text className="text-white text-center font-semibold">
                                 {emailFlowLoading ? "Signing in…" : "Continue"}
@@ -416,6 +415,7 @@ export default function SignInPage() {
                         </View>
                     </Animated.View>
                 </View>
+            </View>
             </KeyboardAvoidingView>
 
             {/* ------------------------------ */}

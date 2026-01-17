@@ -207,7 +207,8 @@ export default function SignUpScreen() {
             keyboardVerticalOffset={Platform.OS === "ios" ? 40 : -80}
             className="flex-1 justify-center bg-black"
         >
-            <View className="px-6 flex-1 justify-center">
+            <View className="flex-1 items-center justify-center p-4 md:p-6">
+                <View className="w-full max-w-lg">
                 <Animated.View
                     className="bg-neutral-900 p-6 rounded-2xl shadow-md border border-neutral-800"
                     style={{ opacity: fadeAnim }}
@@ -259,7 +260,7 @@ export default function SignUpScreen() {
                             {/* Email */}
                             <Text className="text-neutral-400 mb-1">Email</Text>
                             <TextInput
-                                className="bg-neutral-800 text-white px-4 py-3 rounded-xl mb-4"
+                                className="bg-neutral-800 text-white px-4 py-3 rounded-xl mb-4 w-full"
                                 placeholder="you@example.com"
                                 placeholderTextColor="#777"
                                 onChangeText={setEmail}
@@ -272,7 +273,7 @@ export default function SignUpScreen() {
                             <Text className="text-neutral-400 mb-1">Password</Text>
                             <View className="mb-4">
                                 <TextInput
-                                    className="bg-neutral-800 text-white px-4 py-3 rounded-xl"
+                                    className="bg-neutral-800 text-white px-4 py-3 rounded-xl w-full"
                                     placeholder="Create a password"
                                     placeholderTextColor="#777"
                                     secureTextEntry={!passwordVisible}
@@ -291,13 +292,13 @@ export default function SignUpScreen() {
                                         color="#aaa"
                                     />
                                 </TouchableOpacity>
-                            </View>
+            </View>
 
                             {/* Continue */}
                             <TouchableOpacity
                                 onPress={startEmailSignUp}
                                 disabled={emailFlowLoading}
-                                className="bg-blue-600 py-3 rounded-xl"
+                                className="bg-blue-600 py-3 rounded-xl w-full"
                             >
                                 <Text className="text-white text-center font-semibold">
                                     {emailFlowLoading ? "Creating…" : "Continue"}
@@ -325,7 +326,7 @@ export default function SignUpScreen() {
                             <TouchableOpacity
                                 onPress={verifyEmailCode}
                                 disabled={emailFlowLoading}
-                                className="bg-blue-600 py-3 rounded-xl"
+                                className="bg-blue-600 py-3 rounded-xl w-full"
                             >
                                 <Text className="text-white text-center font-semibold">
                                     {emailFlowLoading ? "Verifying…" : "Verify Email"}
@@ -347,6 +348,7 @@ export default function SignUpScreen() {
                     </View>
                 </Animated.View>
             </View>
-        </KeyboardAvoidingView>
+            </View>
+            </KeyboardAvoidingView>
     );
 }

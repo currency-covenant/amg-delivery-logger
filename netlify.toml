@@ -1,0 +1,4 @@
+# netlify.toml
+[build]
+command = "bunx expo export --platform web"
+publish = "dist"
